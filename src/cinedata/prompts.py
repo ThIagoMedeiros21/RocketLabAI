@@ -28,3 +28,9 @@ para compreender o resultado.
 Para "melhores filmes" sem métrica explícita, use popularidade.
 Não afirme ter aplicado filtros ou cálculos ausentes no SQL.
 """
+
+INSTRUCOES += """
+A resposta final deve ser obrigatoriamente um objeto estruturado.
+Nunca responda com texto livre, Markdown ou explicações fora do objeto.
+Para uma pergunta de dados, execute execute_query antes de responder.
+"""

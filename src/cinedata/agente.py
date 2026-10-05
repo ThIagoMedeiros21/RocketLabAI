@@ -8,12 +8,19 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from pydantic import BaseModel, Field, model_validator
-from pydantic_ai import Agent, ModelRetry, RunContext, UsageLimits
+from pydantic_ai import (
+    Agent,
+    ModelRetry,
+    NativeOutput,
+    RunContext,
+    UsageLimits,
+)
 
 from cinedata import dados
 from cinedata.config import carregar_ambiente, criar_modelo
 from cinedata.prompts import INSTRUCOES
 from cinedata.apresentacao import mostrar_resultado
+import re
 
 @dataclass
 class CineDataDeps:
@@ -38,17 +45,62 @@ class RespostaSQL(BaseModel):
 
 LIMITES = UsageLimits(request_limit=8, tool_calls_limit=10)
 
+def validar_dupla_ator_diretor(sql: str) -> str | None:
+    texto = re.sub(r"\s+", " ", sql.lower())
+
+    if "ator" not in texto or "diretor" not in texto:
+        return None
+
+    aliases = re.findall(
+        r"(?:join|from)\s+bridge_movie_person\s+([a-z_][a-z0-9_]*)",
+        texto,
+    )
+
+    aliases = list(dict.fromkeys(aliases))
+
+    if len(aliases) < 2:
+        return (
+            "Use duas referências independentes a bridge_movie_person: "
+            "uma para o ator e outra para o diretor."
+        )
+
+    ligados_pelo_mesmo_filme = any(
+        re.search(
+            rf"{re.escape(a)}\.sk_movie_id\s*=\s*{re.escape(b)}\.sk_movie_id",
+            texto,
+        )
+        or re.search(
+            rf"{re.escape(b)}\.sk_movie_id\s*=\s*{re.escape(a)}\.sk_movie_id",
+            texto,
+        )
+        for a in aliases
+        for b in aliases
+        if a != b
+    )
+
+    if not ligados_pelo_mesmo_filme:
+        return (
+            "Ligue as duas bridge_movie_person pelo mesmo sk_movie_id."
+        )
+
+    if "group by" not in texto or "sk_person_id" not in texto:
+        return (
+            "Agrupe pelos IDs do ator e do diretor, além dos nomes."
+        )
+
+    return None
 
 def criar_agente(model=None):
+    
     agent = Agent(
         model,
         deps_type=CineDataDeps,
         output_type=RespostaSQL,
-        retries=2,
+        retries=1,
         instructions=INSTRUCOES,
         model_settings={
             "temperature": 0,
-            "max_tokens": 1800,
+            "max_tokens": 700,
             "parallel_tool_calls": False,
             "thinking": False,
             "openai_reasoning_effort": "none",
@@ -57,45 +109,48 @@ def criar_agente(model=None):
 
     @agent.instructions
     def contexto(ctx: RunContext[CineDataDeps]) -> str:
-        return f"Data de referência: {ctx.deps.hoje.isoformat()}\nEsquema:\n{ctx.deps.schema}"
+        return (
+            f"Data de referência: {ctx.deps.hoje.isoformat()}\n"
+            f"Esquema:\n{ctx.deps.schema}"
+        )
 
     @agent.tool
-    async def get_table_info(ctx: RunContext[CineDataDeps], table_name: str) -> dict:
-        """Consulta o esquema e duas linhas de exemplo de uma tabela permitida."""
+    async def execute_query(
+        ctx: RunContext[CineDataDeps],
+        sql_query: str,
+    ) -> dict:
+        """Executa somente consultas SQLite de leitura."""
         try:
-            return dados.get_table_info(ctx.deps.db_path, table_name, ctx.deps.snapshot)
+            resultado = dados.execute_sql(
+                ctx.deps.db_path,
+                sql_query,
+                ctx.deps.snapshot,
+            )
+            ctx.deps.consultas[sql_query] = resultado
+            return resultado
         except (ValueError, sqlite3.Error) as exc:
-            raise ModelRetry(str(exc)) from exc
-
-    @agent.tool
-    async def get_distinct_values(ctx: RunContext[CineDataDeps], table_name: str, column_name: str) -> dict:
-        """Obtém até vinte valores distintos de uma coluna para verificar filtros."""
-        try:
-            return dados.get_distinct_values(ctx.deps.db_path, table_name, column_name, ctx.deps.snapshot)
-        except (ValueError, sqlite3.Error) as exc:
-            raise ModelRetry(str(exc)) from exc
-
-    @agent.tool
-    async def execute_query(ctx: RunContext[CineDataDeps], sql_query: str) -> dict:
-        """Testa uma consulta SQL somente leitura, com limite de tempo e de linhas."""
-        try:
-            result = dados.execute_sql(ctx.deps.db_path, sql_query, ctx.deps.snapshot)
-            ctx.deps.consultas[sql_query] = result
-            return result
-        except (ValueError, sqlite3.Error) as exc:
-            raise ModelRetry(f"Consulta rejeitada: {exc}. Corrija o SQL respeitando as regras.") from exc
+            raise ModelRetry(
+                f"Consulta rejeitada: {exc}. Corrija o SQL."
+            ) from exc
 
     @agent.output_validator
-    def verificar_saida(ctx: RunContext[CineDataDeps], output: RespostaSQL) -> RespostaSQL:
-        if output.sql and output.sql not in ctx.deps.consultas:
-            raise ModelRetry("Execute o SQL final usando execute_query antes de responder.")
-        return output
+    def verificar_saida(
+            ctx: RunContext[CineDataDeps],
+            output: RespostaSQL,
+        ) -> RespostaSQL:
+            if output.sql and output.sql not in ctx.deps.consultas:
+                raise ModelRetry(
+                    "Execute o SQL final usando execute_query antes de responder."
+                )
+
+            return output
 
     return agent
 
 
 async def perguntar(agent, deps, pergunta, historico=None):
     import sys
+
     from pydantic_ai import capture_run_messages
     from pydantic_ai.messages import ModelResponse
 
@@ -114,8 +169,8 @@ async def perguntar(agent, deps, pergunta, historico=None):
                     "thinking": False,
                     "openai_reasoning_effort": "none",
                 },
-    usage_limits=LIMITES,
-)
+                usage_limits=LIMITES,
+            )
         except Exception:
             for mensagem in reversed(mensagens):
                 if isinstance(mensagem, ModelResponse):
@@ -127,12 +182,29 @@ async def perguntar(agent, deps, pergunta, historico=None):
                     break
             raise
 
-def resultado_verificado(result, deps):
-    output = result.output.model_dump()
-    if result.output.sql:
-        output["resultado"] = deps.consultas[result.output.sql]
-    return output
+def resultado_verificado(result, deps: CineDataDeps) -> dict:
+    """
+    Converte a resposta estruturada da IA em um dicionário
+    com o resultado real retornado pelo SQLite.
+    """
+    saida = result.output
 
+    if saida.esclarecimento:
+        return {
+            "resposta": saida.resposta,
+            "sql": "",
+            "esclarecimento": saida.esclarecimento,
+            "resultado": None,
+        }
+
+    resultado = deps.consultas.get(saida.sql)
+
+    return {
+        "resposta": saida.resposta,
+        "sql": saida.sql,
+        "esclarecimento": "",
+        "resultado": resultado,
+    }
 
 async def _chat(args):
     config = carregar_ambiente()
