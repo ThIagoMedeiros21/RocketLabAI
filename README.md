@@ -80,126 +80,225 @@ A instalação inicial requer internet para baixar código, banco, dependências
 
 ## Instalação
 
-### 1. Prepare as ferramentas
+Escolha o roteiro do seu sistema. Ambos começam em **um computador sem as ferramentas do projeto instaladas**:
 
-No Fedora, instale Git, Git LFS e as ferramentas do frontend:
+- [Fedora](#instalação-no-fedora)
+- [Windows](#instalação-no-windows)
 
-```bash
-sudo dnf install git git-lfs nodejs npm
-git lfs install
+**Verificação do download:** em 05/10/2026, um clone novo do commit `974a4f4` baixou o banco pelo Git LFS sem comandos de restauração. O arquivo tinha 581.120.000 bytes, SHA-256 `410f5beef6ab9fb34b9044d5dd191f56f3f0dc30a56e6432386ecef0d977b012`, e retornou 95.645 registros em `dim_movies`. Isso verifica o download e a leitura do banco, não toda a instalação Windows.
+
+Execute os comandos na ordem e aguarde cada etapa terminar. Se algum comando falhar, resolva o erro antes de continuar. É necessário acesso à internet para baixar as ferramentas, as dependências, o banco e o modelo. Nas próximas execuções, esses downloads não precisam ser repetidos.
+
+O arquivo `Modelfile` está versionado na raiz do repositório e será obtido no clone. Ele contém:
+
+```dockerfile
+FROM qwen3:4b-instruct-2507-q4_K_M
+PARAMETER num_ctx 8192
+PARAMETER temperature 0
 ```
 
-Instale também **uv** e **Ollama** conforme as instruções de instalação dessas ferramentas. Confira:
+Esse modelo-base está disponível na [biblioteca do Ollama](https://ollama.com/library/qwen3:4b-instruct-2507-q4_K_M). A definição não contém caminhos específicos de Linux ou Windows. O comando `ollama pull` abaixo baixa os pesos e `ollama create` cria o nome `cinedata-rocket` usado pelo projeto.
+
+### Instalação no Fedora
+
+#### 1. Instale Git, Git LFS, Node.js e npm
+
+Abra o Terminal e execute:
 
 ```bash
+sudo dnf install git git-lfs curl nodejs npm
+```
+
+#### 2. Instale uv e Ollama
+
+Use os instaladores oficiais:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+Referências: [instalação do uv](https://docs.astral.sh/uv/getting-started/installation/) e [instalação do Ollama no Linux](https://docs.ollama.com/linux).
+
+Feche o terminal e abra outro para carregar os caminhos instalados. Confira:
+
+```bash
+git --version
+git lfs version
 uv --version
-ollama --version
 node --version
 npm --version
+ollama --version
 ```
 
-### 2. Clone o repositório
+Se algum comando não for reconhecido, confira sua instalação. Use Node.js compatível com Vite 6; se o pacote do seu Fedora estiver desatualizado, consulte a [instalação oficial do Node.js LTS](https://nodejs.org/en/download).
+
+#### 3. Clone o projeto em uma pasta nova
 
 ```bash
+mkdir -p "$HOME/Projetos"
+cd "$HOME/Projetos"
+git lfs install
 git clone https://github.com/ThIagoMedeiros21/RocketLabAI.git
 cd RocketLabAI
-git lfs pull
+git lfs pull origin
 ```
 
-O banco tem aproximadamente **554 MiB** e é distribuído pelo Git LFS. O arquivo local precisa conter o banco real, não apenas o pequeno arquivo de referência do LFS.
+Este roteiro instala o projeto em uma pasta nova. Espere o comando `git clone` terminar: ele também pode baixar o banco pelo LFS antes de devolver o prompt. Se a pasta `RocketLabAI` já existir, escolha outra pasta para o clone; não reutilize uma cópia com alterações locais.
+
+#### 4. Instale Python e as dependências
+
+Ainda na raiz do projeto:
 
 ```bash
-git lfs ls-files
-ls -lh cinerocket.db
+uv python install 3.12
+uv sync --locked --python 3.12
 ```
 
-### 3. Instale as dependências Python
+O uv instala o Python, cria `.venv` e instala as dependências. Não é necessário ativar o ambiente virtual manualmente.
+
+Confirme que o banco foi realmente baixado:
 
 ```bash
-uv sync --locked
+uv run python -c "from pathlib import Path; p=Path('cinerocket.db'); assert p.is_file(), 'Banco ausente'; f=p.open('rb'); h=f.read(16); f.close(); assert h == b'SQLite format 3\x00', 'Arquivo nao e SQLite: confira o Git LFS'; print('SQLite confirmado:', p.stat().st_size, 'bytes')"
 ```
 
-O ambiente `.venv` é criado automaticamente. Não é necessário ativá-lo para usar `uv run`.
+O banco observado no desenvolvimento tem **581.120.000 bytes**, aproximadamente 554 MiB. A verificação deve mostrar `SQLite confirmado`. Apenas executar `git lfs ls-files` não confirma a presença do banco na pasta.
 
-### 4. Configure o ambiente
+#### 5. Crie o arquivo .env
 
-Crie `.env` na raiz do projeto:
+Execute este bloco inteiro na raiz `RocketLabAI`:
 
-```dotenv
+```bash
+cat > .env <<'ENV'
 DB_PATH=cinerocket.db
 MODELO_LLM=cinedata-rocket
 DB_SNAPSHOT=false
+ENV
 ```
 
-| Variável | Descrição |
-| --- | --- |
-| `DB_PATH` | Caminho do SQLite; caminhos relativos são resolvidos a partir da raiz do projeto |
-| `MODELO_LLM` | Nome de um modelo local instalado no Ollama |
-| `DB_SNAPSHOT` | Modo de arquivo imutável; deixe `false` no uso normal |
-
-Use `DB_SNAPSHOT=true` apenas para uma cópia estática do banco, sem gravação concorrente nem WAL pendente. Não é uma opção necessária para iniciar o projeto.
-
-### 5. Prepare o modelo
+#### 6. Inicie o Ollama e baixe o modelo
 
 ```bash
+sudo systemctl start ollama
 ollama list
 ```
 
-O modelo indicado em `MODELO_LLM` precisa aparecer na lista. Se o serviço não estiver ativo, execute em outro terminal:
+Se sua instalação não tiver o serviço systemd, abra outro terminal, execute `ollama serve` e mantenha-o aberto. Não inicie uma segunda instância se o serviço já estiver respondendo.
+
+No terminal do projeto:
 
 ```bash
-ollama serve
-```
-
-**Reprodução em uma máquina nova:** `cinedata-rocket` é um nome personalizado. O código, sozinho, não instala esse modelo. Na versão inspecionada, ainda não há um `Modelfile` na raiz do repositório. Para reproduzir exatamente o ambiente, é necessário disponibilizar a definição do modelo e seu modelo-base.
-
-Quando um `Modelfile` reproduzível estiver disponível, sua criação será:
-
-```bash
+ls -l Modelfile
+ollama pull qwen3:4b-instruct-2507-q4_K_M
 ollama create cinedata-rocket -f Modelfile
+ollama list
 ```
 
-O `FROM` desse arquivo deve referenciar um modelo acessível na máquina de destino. Um caminho absoluto para um arquivo da máquina do desenvolvedor não é suficiente. Alternativamente, configure `MODELO_LLM` com outro modelo local compatível com as ferramentas e a saída estruturada do agente; os resultados e o desempenho podem mudar.
+Aguarde os downloads e a criação terminarem. A lista final deve conter `cinedata-rocket`. Se o arquivo não for encontrado, confirme que o terminal está na raiz do projeto e que você clonou a versão atual.
 
-### 6. Confirme o funcionamento
+#### 7. Teste o agente
 
 ```bash
 uv run cinedata-chat --json "Quantos filmes existem no banco?"
 ```
 
-Na versão do banco utilizada nas validações relatadas, foram encontrados **95.645 filmes**. Alterações no banco podem mudar essa quantidade.
+Com a mesma versão do banco, a contagem esperada é **95.645 filmes**. Só prossiga para a interface depois que esse comando funcionar.
+
+#### 8. Inicie a interface
+
+No **primeiro terminal**, inicie a API:
+
+```bash
+cd "$HOME/Projetos/RocketLabAI"
+uv run python -m cinedata.web
+```
+
+No **segundo terminal**, instale as versões registradas no `package-lock.json` e inicie o React:
+
+```bash
+cd "$HOME/Projetos/RocketLabAI/frontend"
+npm ci
+npm run dev
+```
+
+Abra **http://127.0.0.1:5173**. Deixe o Ollama e os dois terminais ativos.
+
+Nas próximas vezes, inicie o Ollama e repita apenas os comandos dos dois terminais, sem `npm ci`. Use `Ctrl+C` para parar os servidores.
 
 ### Instalação no Windows
 
-Instale **Git for Windows, Git LFS, uv, Ollama e Node.js com npm** pelos sites oficiais:
+Use o **PowerShell**, disponível no menu Iniciar. Este roteiro não exige Git Bash, WSL, Docker ou editor de código. Confira os [requisitos do Ollama no Windows](https://docs.ollama.com/windows) para seu sistema e drivers.
 
-- [Git for Windows](https://git-scm.com/downloads/win)
-- [Git LFS](https://git-lfs.com/)
-- [uv — instruções de instalação](https://docs.astral.sh/uv/getting-started/installation/)
-- [Ollama para Windows](https://ollama.com/download/windows)
-- [Node.js](https://nodejs.org/en/download)
+#### 1. Baixe e instale as ferramentas
 
-Após instalar, abra um novo **PowerShell**. Os comandos abaixo devem ser executados nele.
+Abra os links no navegador e execute os instaladores:
+
+| Ferramenta | Download oficial | Durante a instalação |
+| --- | --- | --- |
+| Git for Windows | [Baixar Git](https://git-scm.com/downloads/win) | Permita o uso do Git pela linha de comando |
+| Git LFS | [Baixar Git LFS](https://git-lfs.com/) | Instale caso não tenha vindo incluído no Git |
+| Node.js LTS | [Baixar Node.js](https://nodejs.org/en/download) | Mantenha npm e inclusão no PATH |
+| Ollama | [Baixar Ollama](https://ollama.com/download/windows) | Instale e abra o aplicativo |
+
+O Python será baixado pelo uv na etapa 4. Não é necessário instalá-lo separadamente.
+
+#### 2. Instale uv e confira os comandos
+
+Abra o PowerShell e execute o instalador oficial:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+Referência: [instalação do uv](https://docs.astral.sh/uv/getting-started/installation/).
+
+Feche o terminal e abra um **novo PowerShell** para carregar os caminhos das ferramentas. Confira:
 
 ```powershell
 git --version
-git lfs install
+git lfs version
 uv --version
-ollama --version
 node --version
-npm --version
+npm.cmd --version
+ollama --version
 ```
 
-Clone o projeto e baixe o banco:
+Todos devem mostrar uma versão. Se aparecer “comando não reconhecido”, confira a instalação correspondente antes de seguir. `npm.cmd` evita depender da execução de `npm.ps1` no PowerShell.
+
+#### 3. Clone o projeto e baixe o banco
 
 ```powershell
+New-Item -ItemType Directory -Force "$HOME\Projetos"
+Set-Location "$HOME\Projetos"
+git lfs install
 git clone https://github.com/ThIagoMedeiros21/RocketLabAI.git
 Set-Location RocketLabAI
-git lfs pull
-uv sync --locked
+git lfs pull origin
 ```
 
-Crie o `.env` na raiz do projeto:
+Os comandos usam a pasta `Projetos` dentro da sua pasta de usuário. Aguarde o `git clone` terminar: o banco pode ser baixado pelo LFS durante essa etapa. Se já existir uma cópia `RocketLabAI`, escolha outra pasta para o clone. Prefira clonar pelo Git para obter o banco com Git LFS.
+
+#### 4. Instale Python e as dependências
+
+```powershell
+uv python install 3.12
+uv sync --locked --python 3.12
+```
+
+O uv baixa o Python e cria o ambiente `.venv` automaticamente. Use `uv run`; não é necessário ativar esse ambiente.
+
+Confira o banco:
+
+```powershell
+uv run python -c "from pathlib import Path; p=Path('cinerocket.db'); assert p.is_file(), 'Banco ausente'; f=p.open('rb'); h=f.read(16); f.close(); assert h == b'SQLite format 3\x00', 'Arquivo nao e SQLite: confira o Git LFS'; print('SQLite confirmado:', p.stat().st_size, 'bytes')"
+```
+
+O resultado deve começar com `SQLite confirmado`. Na versão utilizada no desenvolvimento, o tamanho é **581.120.000 bytes**.
+
+#### 5. Crie o arquivo .env
+
+Ainda na raiz `RocketLabAI`, copie este bloco inteiro:
 
 ```powershell
 @"
@@ -209,51 +308,52 @@ DB_SNAPSHOT=false
 "@ | Set-Content -Encoding ascii .env
 ```
 
-Abra o Ollama e confira os modelos:
+#### 6. Baixe e crie o modelo
+
+Abra o **Ollama pelo menu Iniciar**. No terminal do projeto:
 
 ```powershell
 ollama list
+Get-Item .\Modelfile
+ollama pull qwen3:4b-instruct-2507-q4_K_M
+ollama create cinedata-rocket -f .\Modelfile
+ollama list
 ```
 
-O modelo personalizado **cinedata-rocket precisa estar instalado também no Windows**. O clone não o transfere. Siga a seção “Prepare o modelo”: quando o `Modelfile` reproduzível estiver disponível, execute `ollama create cinedata-rocket -f Modelfile`. Sem essa definição, a configuração exata do modelo original continua sendo uma dependência pendente.
+A primeira lista pode estar vazia; a última deve conter `cinedata-rocket`. Espere o download e a criação terminarem. Se `Get-Item` não encontrar o arquivo, confirme que o terminal está na raiz do projeto e que você clonou a versão atual.
 
-Teste pelo terminal:
+Se houver erro de conexão, confirme que o aplicativo Ollama está aberto. Como alternativa, execute `ollama serve` em outro terminal e mantenha-o aberto. Não inicie outra instância se o serviço já estiver ativo.
+
+#### 7. Teste o agente
 
 ```powershell
 uv run cinedata-chat --json "Quantos filmes existem no banco?"
 ```
 
-Para usar a interface, mantenha dois terminais abertos. No primeiro, na raiz do projeto:
+Na versão original do banco, a contagem foi **95.645 filmes**. Se o comando falhar, resolva o erro antes de abrir a interface.
+
+#### 8. Inicie a interface
+
+**Primeiro PowerShell — API:**
 
 ```powershell
+Set-Location "$HOME\Projetos\RocketLabAI"
 uv run python -m cinedata.web
 ```
 
-No segundo, entre na pasta do projeto e depois no frontend:
+**Segundo PowerShell — React:**
 
 ```powershell
-Set-Location frontend
-npm.cmd install
+Set-Location "$HOME\Projetos\RocketLabAI\frontend"
+npm.cmd ci
 npm.cmd run dev
 ```
 
-Abra **http://127.0.0.1:5173** no navegador. O uso de `npm.cmd` evita depender da permissão para executar o script `npm.ps1` no PowerShell.
+Abra **http://127.0.0.1:5173** no navegador. Mantenha o Ollama e os dois terminais ativos. Não precisa abrir o chat interativo em paralelo.
 
-Para executar os testes de infraestrutura no Windows, na raiz do projeto:
+Nas próximas vezes, abra o Ollama e repita somente os comandos dos dois terminais, omitindo `npm.cmd ci`. Para encerrar os servidores, pressione `Ctrl+C`.
 
-```powershell
-uv sync --group dev --locked
-uv run --group dev python -m pytest tests/validacao/test_base.py -v
-```
-
-Para salvar uma evidência JSON no PowerShell:
-
-```powershell
-New-Item -ItemType Directory -Force docs/evidencias
-uv run cinedata-chat --json "Quantos filmes existem no banco?" | Out-File -Encoding utf8 docs/evidencias/contagem.json
-```
-
-Verifique se o comando concluiu sem erro antes de considerar o arquivo uma evidência válida. O roteiro Windows foi documentado, mas ainda não foi validado por uma execução do projeto nesse sistema.
+O roteiro Windows foi revisado com a documentação oficial, mas ainda não foi executado em uma instalação Windows durante esta revisão.
 
 ## Como usar
 
@@ -304,7 +404,7 @@ uv run python -m cinedata.web
 
 ```bash
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
 
@@ -486,6 +586,7 @@ RocketLabAI/
 ├── tests/validacao/
 │   ├── conftest.py
 │   └── test_base.py
+├── Modelfile                # Definição do modelo local no Ollama
 ├── cinerocket.db             # Banco distribuído via Git LFS
 ├── .gitattributes            # Regras do Git LFS
 ├── .gitignore
