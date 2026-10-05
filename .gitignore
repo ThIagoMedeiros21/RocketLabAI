@@ -14,13 +14,10 @@ dist/
 .env.*
 !.env.example
 
-# Bancos locais
-*.db
+# Arquivos temporários do SQLite
 *.db-wal
 *.db-shm
 *.db-journal
-*.sqlite
-*.sqlite3
 
 # Caches de testes e análise
 .pytest_cache/
