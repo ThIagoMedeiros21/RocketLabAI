@@ -80,14 +80,8 @@ A instalação inicial requer internet para baixar código, banco, dependências
 
 ## Instalação
 
-Escolha o roteiro do seu sistema. Ambos começam em **um computador sem as ferramentas do projeto instaladas**:
 
-- [Fedora](#instalação-no-fedora)
-- [Windows](#instalação-no-windows)
 
-**Verificação do download:** em 05/10/2026, um clone novo do commit `974a4f4` baixou o banco pelo Git LFS sem comandos de restauração. O arquivo tinha 581.120.000 bytes, SHA-256 `410f5beef6ab9fb34b9044d5dd191f56f3f0dc30a56e6432386ecef0d977b012`, e retornou 95.645 registros em `dim_movies`. Isso verifica o download e a leitura do banco, não toda a instalação Windows.
-
-Execute os comandos na ordem e aguarde cada etapa terminar. Se algum comando falhar, resolva o erro antes de continuar. É necessário acesso à internet para baixar as ferramentas, as dependências, o banco e o modelo. Nas próximas execuções, esses downloads não precisam ser repetidos.
 
 O arquivo `Modelfile` está versionado na raiz do repositório e será obtido no clone. Ele contém:
 
@@ -225,135 +219,6 @@ npm run dev
 Abra **http://127.0.0.1:5173**. Deixe o Ollama e os dois terminais ativos.
 
 Nas próximas vezes, inicie o Ollama e repita apenas os comandos dos dois terminais, sem `npm ci`. Use `Ctrl+C` para parar os servidores.
-
-### Instalação no Windows
-
-Use o **PowerShell**, disponível no menu Iniciar. Este roteiro não exige Git Bash, WSL, Docker ou editor de código. Confira os [requisitos do Ollama no Windows](https://docs.ollama.com/windows) para seu sistema e drivers.
-
-#### 1. Baixe e instale as ferramentas
-
-Abra os links no navegador e execute os instaladores:
-
-| Ferramenta | Download oficial | Durante a instalação |
-| --- | --- | --- |
-| Git for Windows | [Baixar Git](https://git-scm.com/downloads/win) | Permita o uso do Git pela linha de comando |
-| Git LFS | [Baixar Git LFS](https://git-lfs.com/) | Instale caso não tenha vindo incluído no Git |
-| Node.js LTS | [Baixar Node.js](https://nodejs.org/en/download) | Mantenha npm e inclusão no PATH |
-| Ollama | [Baixar Ollama](https://ollama.com/download/windows) | Instale e abra o aplicativo |
-
-O Python será baixado pelo uv na etapa 4. Não é necessário instalá-lo separadamente.
-
-#### 2. Instale uv e confira os comandos
-
-Abra o PowerShell e execute o instalador oficial:
-
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-```
-
-Referência: [instalação do uv](https://docs.astral.sh/uv/getting-started/installation/).
-
-Feche o terminal e abra um **novo PowerShell** para carregar os caminhos das ferramentas. Confira:
-
-```powershell
-git --version
-git lfs version
-uv --version
-node --version
-npm.cmd --version
-ollama --version
-```
-
-Todos devem mostrar uma versão. Se aparecer “comando não reconhecido”, confira a instalação correspondente antes de seguir. `npm.cmd` evita depender da execução de `npm.ps1` no PowerShell.
-
-#### 3. Clone o projeto e baixe o banco
-
-```powershell
-New-Item -ItemType Directory -Force "$HOME\Projetos"
-Set-Location "$HOME\Projetos"
-git lfs install
-git clone https://github.com/ThIagoMedeiros21/RocketLabAI.git
-Set-Location RocketLabAI
-git lfs pull origin
-```
-
-Os comandos usam a pasta `Projetos` dentro da sua pasta de usuário. Aguarde o `git clone` terminar: o banco pode ser baixado pelo LFS durante essa etapa. Se já existir uma cópia `RocketLabAI`, escolha outra pasta para o clone. Prefira clonar pelo Git para obter o banco com Git LFS.
-
-#### 4. Instale Python e as dependências
-
-```powershell
-uv python install 3.12
-uv sync --locked --python 3.12
-```
-
-O uv baixa o Python e cria o ambiente `.venv` automaticamente. Use `uv run`; não é necessário ativar esse ambiente.
-
-Confira o banco:
-
-```powershell
-uv run python -c "from pathlib import Path; p=Path('cinerocket.db'); assert p.is_file(), 'Banco ausente'; f=p.open('rb'); h=f.read(16); f.close(); assert h == b'SQLite format 3\x00', 'Arquivo nao e SQLite: confira o Git LFS'; print('SQLite confirmado:', p.stat().st_size, 'bytes')"
-```
-
-O resultado deve começar com `SQLite confirmado`. Na versão utilizada no desenvolvimento, o tamanho é **581.120.000 bytes**.
-
-#### 5. Crie o arquivo .env
-
-Ainda na raiz `RocketLabAI`, copie este bloco inteiro:
-
-```powershell
-@"
-DB_PATH=cinerocket.db
-MODELO_LLM=cinedata-rocket
-DB_SNAPSHOT=false
-"@ | Set-Content -Encoding ascii .env
-```
-
-#### 6. Baixe e crie o modelo
-
-Abra o **Ollama pelo menu Iniciar**. No terminal do projeto:
-
-```powershell
-ollama list
-Get-Item .\Modelfile
-ollama pull qwen3:4b-instruct-2507-q4_K_M
-ollama create cinedata-rocket -f .\Modelfile
-ollama list
-```
-
-A primeira lista pode estar vazia; a última deve conter `cinedata-rocket`. Espere o download e a criação terminarem. Se `Get-Item` não encontrar o arquivo, confirme que o terminal está na raiz do projeto e que você clonou a versão atual.
-
-Se houver erro de conexão, confirme que o aplicativo Ollama está aberto. Como alternativa, execute `ollama serve` em outro terminal e mantenha-o aberto. Não inicie outra instância se o serviço já estiver ativo.
-
-#### 7. Teste o agente
-
-```powershell
-uv run cinedata-chat --json "Quantos filmes existem no banco?"
-```
-
-Na versão original do banco, a contagem foi **95.645 filmes**. Se o comando falhar, resolva o erro antes de abrir a interface.
-
-#### 8. Inicie a interface
-
-**Primeiro PowerShell — API:**
-
-```powershell
-Set-Location "$HOME\Projetos\RocketLabAI"
-uv run python -m cinedata.web
-```
-
-**Segundo PowerShell — React:**
-
-```powershell
-Set-Location "$HOME\Projetos\RocketLabAI\frontend"
-npm.cmd ci
-npm.cmd run dev
-```
-
-Abra **http://127.0.0.1:5173** no navegador. Mantenha o Ollama e os dois terminais ativos. Não precisa abrir o chat interativo em paralelo.
-
-Nas próximas vezes, abra o Ollama e repita somente os comandos dos dois terminais, omitindo `npm.cmd ci`. Para encerrar os servidores, pressione `Ctrl+C`.
-
-O roteiro Windows foi revisado com a documentação oficial, mas ainda não foi executado em uma instalação Windows durante esta revisão.
 
 ## Como usar
 
