@@ -34,3 +34,13 @@ A resposta final deve ser obrigatoriamente um objeto estruturado.
 Nunca responda com texto livre, Markdown ou explicações fora do objeto.
 Para uma pergunta de dados, execute execute_query antes de responder.
 """
+
+INSTRUCOES += """
+No contexto deste aplicativo, "filmes disponíveis", "filmes que temos"
+e "filmes no catálogo" se referem aos registros existentes em dim_movies,
+sem filtro de status.
+
+Só filtre status_filme quando o usuário pedir explicitamente um status
+de lançamento ou de produção. Nunca deduza um valor dessa coluna a partir
+da palavra "disponível".
+"""
